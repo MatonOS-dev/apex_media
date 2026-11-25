@@ -2,30 +2,31 @@
 # Generate the frozen audio AIDL NDK backend and build our vendored AIDL HAL.
 set -Eeuo pipefail
 die() { echo "ERROR: $*" >&2; exit 1; }
-DEVICE_DIR=$(cd "$(dirname "$0")/.." && pwd)
-AOSP=$(readlink -f "$DEVICE_DIR/../../..")
-. "$(dirname -- "$(readlink -f -- "$0")")/../tools/local-env.sh"
+MEDIA_DIR=$(dirname -- "$(readlink -f -- "$0")")
+# The caller owns machine configuration; no implicit device-tree includes.
+AOSP=${MATON_AOSP_ROOT:?set MATON_AOSP_ROOT to the AOSP checkout}
+STAGE=${MATON_AUDIO_STAGE:?set MATON_AUDIO_STAGE to the native staging directory}
 NDK=${ANDROID_NDK:-$HOME/Documents/android-ndk-r30}
 CMAKE=${MATON_CMAKE:-$AOSP/prebuilts/cmake/linux-x86/bin/cmake}
 NINJA=${MATON_NINJA:-$(command -v ninja || true)}
 AIDL=$AOSP/out/host/linux-x86/bin/aidl
 OUT=${MATON_AUDIO_OUT:-$AOSP/out/pc-native/maton-audio-hal}
 API=35
-JOBS=${MATON_BUILD_JOBS:-4}
+JOBS=${MATON_BUILD_JOBS:-$(nproc)}
 GEN=$OUT/aidl
-STATIC_LIBS=$DEVICE_DIR/audio/native-hal/deps/lib64
-DEPS_INCLUDE=$DEVICE_DIR/audio/native-hal/deps/include
+STATIC_LIBS=$MEDIA_DIR/native-hal/deps/lib64
+DEPS_INCLUDE=$MEDIA_DIR/native-hal/deps/include
 
-[[ $JOBS =~ ^[1-4]$ ]] || die "MATON_BUILD_JOBS must be between 1 and 4"
+[[ $JOBS =~ ^[0-9]+$ && $JOBS =~ [1-9] ]] || die "MATON_BUILD_JOBS must be a positive integer"
 [[ -x $AIDL && -x $CMAKE && -n $NINJA ]] || die "AOSP aidl, CMake or Ninja missing"
-(cd "$DEVICE_DIR/audio/native-hal" && sha256sum -c SHA256SUMS >/dev/null) ||
+(cd "$MEDIA_DIR/native-hal" && sha256sum -c SHA256SUMS >/dev/null) ||
   die "pinned audio HAL snapshot checksum mismatch; review changes and refresh SHA256SUMS"
 [[ -x $NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android$API-clang ]] ||
   die "NDK r30 / API $API is required"
 mkdir -p "$GEN/include" "$STATIC_LIBS"
 rm -f "$STATIC_LIBS/libmedia_helper.a" \
       "$STATIC_LIBS/libaudio_aidl_conversion_common_ndk.a"
-TP=$DEVICE_DIR/audio/native-hal/third_party
+TP=$MEDIA_DIR/native-hal/third_party
 include_roots=(
   "$TP/hardware_interfaces/hardware_interfaces/audio/aidl/common/include"
   "$TP/frameworks_av/frameworks/av/media/audioaidlconversion/include"
@@ -59,7 +60,7 @@ if [[ ! -s $header_hash_file || $(cat "$header_hash_file") != "$header_hash" ]];
   printf '%s\n' "$header_hash" > "$header_hash_file"
 fi
 
-snapshot_root=$DEVICE_DIR/audio/native-hal/aidl-snapshots
+snapshot_root=$MEDIA_DIR/native-hal/aidl-snapshots
 roots=()
 entries=()
 while IFS=$'\t' read -r package version relative; do
@@ -68,11 +69,11 @@ while IFS=$'\t' read -r package version relative; do
   [[ -s $snapshot/.hash ]] || die "pinned AIDL snapshot/hash missing: $snapshot"
   roots+=(-I "$snapshot")
   entries+=("$package"$'\t'"$version"$'\t'"$snapshot")
-done < "$DEVICE_DIR/audio/native-hal/stable-aidl.list"
+done < "$MEDIA_DIR/native-hal/stable-aidl.list"
 aidl_inputs_hash=$(find "$snapshot_root" -type f \( -name '*.aidl' -o -name '.hash' \) -print0 |
   sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
 aidl_stamp=$({
-  sha256sum "$AIDL" "$DEVICE_DIR/audio/native-hal/stable-aidl.list"
+  sha256sum "$AIDL" "$MEDIA_DIR/native-hal/stable-aidl.list"
   printf '%s\n' "$aidl_inputs_hash" 'lang=ndk min_sdk=31 structured=1 stability=vintf'
 } | sha256sum | cut -d' ' -f1)
 if [[ ! -s $GEN/.maton-aidl-stamp || $(cat "$GEN/.maton-aidl-stamp") != "$aidl_stamp" ]]; then
@@ -90,7 +91,7 @@ if [[ ! -s $GEN/.maton-aidl-stamp || $(cat "$GEN/.maton-aidl-stamp") != "$aidl_s
   printf '%s\n' "$aidl_stamp" > "$GEN/.maton-aidl-stamp"
 fi
 
-"$CMAKE" -S "$DEVICE_DIR/audio/native-hal" -B "$OUT/build" -G Ninja \
+"$CMAKE" -S "$MEDIA_DIR/native-hal" -B "$OUT/build" -G Ninja \
   -DCMAKE_MAKE_PROGRAM="$NINJA" \
   -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
   -DANDROID_ABI=x86_64 -DANDROID_PLATFORM=android-$API \
@@ -144,7 +145,7 @@ for symbol in "${undefined[@]}"; do
   fi
 done
 install -D -m 0755 "$OUT/build/matonos-audio-hal" \
-  "$DEVICE_DIR/buildinfra/native-built/matonos-audio-hal"
-"$STRIP" --strip-debug "$DEVICE_DIR/buildinfra/native-built/matonos-audio-hal"
-install -D -m 0644 "$DEVICE_DIR/audio/native-hal/vintf/manifest.xml" \
-  "$DEVICE_DIR/buildinfra/native-built/vintf/matonos-audio-hal/manifest.xml"
+  "$STAGE/matonos-audio-hal"
+"$STRIP" --strip-debug "$STAGE/matonos-audio-hal"
+install -D -m 0644 "$MEDIA_DIR/native-hal/vintf/manifest.xml" \
+  "$STAGE/vintf/matonos-audio-hal/manifest.xml"

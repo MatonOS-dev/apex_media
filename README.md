@@ -1,4 +1,83 @@
-# MatonOS audio
+# MatonOS media APEX (`apex_media`)
+
+
+This repository owns `com.matonos.hardware.media` for MatonOS, based on AOSP:
+PipeWire audio, the software Bluetooth audio provider, network speakers and
+the camera provider integration. It preserves the device tree's `audio/`
+history. It is checked out as the device tree's **`audio/` git submodule**;
+all `audio/...` paths below are relative to that containing device tree.
+
+## Repository and integration contract
+
+- `audio.mk` and `BoardConfig.mk`: product and kernel-module configuration,
+  included by the device tree using its `DEVICE_PATH`/`LOCAL_PATH` conventions.
+- `apex/`: prebuilt APEX template, service configuration and SELinux file labels.
+- `pipewire-hal/`, `native-hal/`, `bt-audio/`, `network-speakers/`: HAL sources,
+  pinned AOSP snapshots and transport implementations. Camera provider source
+  remains in the separately maintained AOSP camera fork; this repository
+  carries its media integration configuration, not a second copy of that fork.
+- `config/`, `config-odm/`, `effects/`, `patches/`: policy, runtime configuration
+  and existing third-party adaptations. Provenance files identify their pins.
+
+The containing device tree owns `tools/build-pipewire.sh`,
+`tools/build-audio-apex.sh`, the server/image build orchestration,
+`buildinfra/native-built/audio-apex`, release key provisioning, init triggers,
+System Bridge, channel AIDL, camera fork selection and SELinux policy.
+Its scripts keep using `audio/...`; no path migration or compatibility shim
+is needed. Initialize this checkout with `git submodule update --init audio`.
+Generated files ignored by this repository are still populated at those paths.
+This repository is not an independent image build.
+
+### Dependency audit
+
+`build-hal.sh` was the only executable reaching outside the repository using
+parent traversal: it derived `DEVICE_DIR` from `..`, derived AOSP from
+`../../..`, sourced `../tools/local-env.sh`, and staged to
+`DEVICE_DIR/buildinfra/native-built`. It now resolves its own sources from
+`MEDIA_DIR` and requires explicit `MATON_AOSP_ROOT` and `MATON_AUDIO_STAGE`.
+The caller may source the device tree's `tools/local-env.sh` first:
+
+```sh
+source tools/local-env.sh
+MATON_AUDIO_STAGE="$PWD/buildinfra/native-built" bash audio/build-hal.sh
+```
+
+`ANDROID_NDK`, `MATON_CMAKE`, `MATON_NINJA`, `MATON_AUDIO_OUT` and
+`MATON_BUILD_JOBS` remain optional overrides; jobs default to `nproc`.
+The device-tree caller passes `MATON_AUDIO_OUT` (correcting its former
+`MATON_NATIVE_OUT` argument, which this script never read).
+AOSP supplies host AIDL/CMake and NDK supplies platform tools. Generated HAL
+headers/libraries stay in `native-hal/deps` as before. `audio.mk` explicitly
+uses `device/maton/pc_x86_64/audio` for product copy rules; BoardConfig uses
+`DEVICE_PATH`. Soong modules explicitly depend on platform audio defaults,
+libraries and `vendor.matonos.channel-V2-ndk`. These are containing-product
+inputs, not implicit parent-directory reads. `network-speakers/check-native.sh`
+already requires explicit AOSP/NDK/PipeWire source/build/prefix/output arguments.
+All other `../` uses in sources, tests and documentation remain inside this
+repository; `$ORIGIN/../../lib64` is an installed ELF runtime path. Vendored
+upstream test documentation also mentions upstream-relative paths; it is not
+a device-tree dependency.
+
+### Licensing, keys and validation
+
+MatonOS code is Apache-2.0 unless a file states otherwise; see `LICENSE`.
+Vendored AOSP headers/sources retain Apache-2.0 notices; fmt retains its
+BSD-2-Clause license and bundled test/documentation license notices.
+See `native-hal/third_party/PINNED-SOURCES.md`, `bt-audio/PROVENANCE.md`,
+`network-speakers/PROVENANCE.md` and `pipewire-PROVENANCE.md`. External LGPL
+2.1-or-later dependencies use the LGPL-2.1 option; no (L)GPLv3 is selected.
+Signing keys are machine-local, never source inputs committed here.
+
+The split was checked by comparing the imported tree with the original,
+auditing parent-relative references, scanning all reachable history for key
+files/private-key markers and reviewing vendored license headers. No builds
+or VM tests were run for this repository-only change; runtime acceptance
+status below is unchanged. Fresh-image/hardware checks remain required.
+The existing `native-hal/SHA256SUMS` audit does not pass: it has a checksum
+mismatch for `src/aosp/primary/StreamPrimary.cpp` and lists two absent files,
+`third_party/xsdc/system/tools/xsdc/build/OWNERS` and `build/xsdc.go`.
+These also occur in the byte-identical original tree; repairing the pinned
+snapshot is separate work before the standalone HAL build can pass.
 
 The software-only Bluetooth audio provider is documented in
 [`bt-audio/README.md`](bt-audio/README.md). Its sources and tests compile;

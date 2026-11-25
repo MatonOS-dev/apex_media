@@ -1,0 +1,18 @@
+# Generated artifacts and machine-local secrets
+*.pem
+*.pk8
+*.key
+*.jks
+*.keystore
+*.pass
+*.apk
+*.aab
+*.log
+.gradle/
+build/
+.cxx/
+local.properties
+/native-hal/deps/
+/pipewire-hal/prebuilt/
+/apex/prebuilt/
+/apex/Android.bp
