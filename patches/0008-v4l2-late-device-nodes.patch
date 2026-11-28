@@ -1,0 +1,56 @@
+From: MatonOS
+Subject: [PATCH] spa: v4l2: pick up nodes created after the uevent
+
+Without udevd, libudev-zero delivers the kernel uevent itself, often
+before ueventd has created /dev/videoN. The access check then fails and
+the per-node inotify watch cannot be placed, so a hotplugged camera
+never appears. Watch /dev for IN_CREATE and recheck the device then.
+---
+--- a/spa/plugins/v4l2/v4l2-udev.c
++++ b/spa/plugins/v4l2/v4l2-udev.c
+@@ -5,6 +5,8 @@
+ #include "config.h"
+ 
+ #include <stddef.h>
++#include <stdlib.h>
++#include <string.h>
+ #include <stdio.h>
+ #include <unistd.h>
+ #include <limits.h>
+@@ -67,6 +69,7 @@
+ 
+ 	struct spa_source source;
+ 	struct spa_source notify;
++	int dev_wd;
+ #ifdef HAVE_LOGIND
+ 	struct spa_source logind;
+ 	sd_login_monitor *logind_monitor;
+@@ -457,6 +460,20 @@
+ 				}
+ 			}
+ 
++			/* Without udevd the kernel uevent can arrive before
++			 * ueventd creates the node, so the per-node watch could
++			 * not be placed; pick the device up when it appears. */
++			if (!device && event->wd == this->dev_wd && event->len > 0 &&
++			    strncmp(event->name, "video", 5) == 0) {
++				uint32_t id = (uint32_t)strtoul(event->name + 5, NULL, 10);
++				device = find_device(this, id);
++				if (device) {
++					start_watching_device(this, device);
++					process_device(this, ACTION_CHANGE, device);
++				}
++				continue;
++			}
++
+ 			if (!device)
+ 				continue;
+ 
+@@ -489,6 +506,7 @@
+ 	this->notify.func = impl_on_notify_events;
+ 	this->notify.data = this;
+ 	this->notify.fd = notify_fd;
++	this->dev_wd = inotify_add_watch(notify_fd, "/dev", IN_CREATE);
+ 	this->notify.mask = SPA_IO_IN | SPA_IO_ERR;
+ 
+ 	spa_loop_add_source(this->main_loop, &this->notify);
