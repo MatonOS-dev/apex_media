@@ -1,0 +1,18 @@
+From: MatonOS
+Subject: [PATCH] spa: v4l2: fall back to the sysfs card name
+
+Without udevd there is no hwdb/ID_MODEL, so cameras showed as
+"Unknown device". Use /sys/class/video4linux/videoN/name instead.
+---
+--- a/spa/plugins/v4l2/v4l2-udev.c
++++ b/spa/plugins/v4l2/v4l2-udev.c
+@@ -338,6 +338,9 @@
+ 			str = udev_device_get_property_value(dev, "ID_MODEL");
+ 			if (!(str && *str))
+ 				str = udev_device_get_property_value(dev, "ID_V4L_PRODUCT");
++			/* No udev database: the kernel's V4L2 card name. */
++			if (!(str && *str))
++				str = udev_device_get_sysattr_value(dev, "name");
+ 		} else {
+ 			char *t = alloca(strlen(str) + 1);
+ 			unescape(str, t);
